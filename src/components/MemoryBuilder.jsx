@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 
 export const createMemory = () => ({
   id: uid(),
@@ -11,28 +12,194 @@ export const createMemory = () => ({
   date: '',
   caption: '',
   imageUrl: '',
+  imageFileName: '',
+  imagePreviewUrl: '',
+  isUploadingImage: false,
+  imageUploadError: '',
+  uploadToken: '',
 });
 
 export default function MemoryBuilder({ memories, setMemories }) {
   const [previewErrors, setPreviewErrors] = useState({});
+  const objectUrlsRef = useRef(new Set());
+
+  const revokeObjectUrl = (url) => {
+    if (typeof url === 'string' && url.startsWith('blob:')) {
+      URL.revokeObjectURL(url);
+      objectUrlsRef.current.delete(url);
+    }
+  };
 
   const addMemory = () => setMemories((prev) => [...prev, createMemory()]);
 
   const removeMemory = (id) =>
-    setMemories((prev) => prev.filter((m) => m.id !== id));
+    setMemories((prev) => {
+      const target = prev.find((m) => m.id === id);
+      if (target?.imagePreviewUrl) {
+        revokeObjectUrl(target.imagePreviewUrl);
+      }
+      return prev.filter((m) => m.id !== id);
+    });
 
   const updateMemory = (id, field, value) =>
     setMemories((prev) =>
       prev.map((m) => (m.id === id ? { ...m, [field]: value } : m))
     );
 
-  const handleImageError = (id) => {
-    setPreviewErrors((prev) => ({ ...prev, [id]: true }));
+  const updateMemoryFields = (id, fields) =>
+    setMemories((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...fields } : m))
+    );
+
+  useEffect(() => {
+    const activeBlobUrls = new Set(
+      memories
+        .map((m) => m.imagePreviewUrl)
+        .filter((url) => typeof url === 'string' && url.startsWith('blob:'))
+    );
+
+    objectUrlsRef.current.forEach((url) => {
+      if (!activeBlobUrls.has(url)) {
+        URL.revokeObjectURL(url);
+        objectUrlsRef.current.delete(url);
+      }
+    });
+  }, [memories]);
+
+  useEffect(() => {
+    const objectUrls = objectUrlsRef.current;
+
+    return () => {
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+      objectUrls.clear();
+    };
+  }, []);
+
+  const clearImage = (id) => {
+    setPreviewErrors((prev) => ({ ...prev, [id]: '' }));
+    setMemories((prev) =>
+      prev.map((m) => {
+        if (m.id !== id) return m;
+        if (m.imagePreviewUrl) {
+          revokeObjectUrl(m.imagePreviewUrl);
+        }
+        return {
+          ...m,
+          imageUrl: '',
+          imageFileName: '',
+          imagePreviewUrl: '',
+          isUploadingImage: false,
+          imageUploadError: '',
+          uploadToken: '',
+        };
+      })
+    );
   };
 
-  const handleImageChange = (id, value) => {
-    setPreviewErrors((prev) => ({ ...prev, [id]: false }));
-    updateMemory(id, 'imageUrl', value);
+  const handleImageError = (id) => {
+    setPreviewErrors((prev) => ({ ...prev, [id]: 'Could not preview selected image.' }));
+  };
+
+  const uploadImageFile = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/api/upload-memory-image', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || 'Image upload failed.');
+    }
+
+    return json.url;
+  };
+
+  const handleFileChange = async (id, file) => {
+    if (!file) {
+      clearImage(id);
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      clearImage(id);
+      updateMemoryFields(id, {
+        imageUploadError: 'Please choose a valid image file.',
+      });
+      return;
+    }
+
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      clearImage(id);
+      updateMemoryFields(id, {
+        imageUploadError: 'Image must be 5MB or smaller.',
+      });
+      return;
+    }
+
+    setPreviewErrors((prev) => ({ ...prev, [id]: '' }));
+    const uploadToken = uid();
+    const previewUrl = URL.createObjectURL(file);
+    objectUrlsRef.current.add(previewUrl);
+
+    setMemories((prev) =>
+      prev.map((m) => {
+        if (m.id !== id) return m;
+
+        if (m.imagePreviewUrl) {
+          revokeObjectUrl(m.imagePreviewUrl);
+        }
+
+        return {
+          ...m,
+          imageUrl: '',
+          imageFileName: file.name,
+          imagePreviewUrl: previewUrl,
+          isUploadingImage: true,
+          imageUploadError: '',
+          uploadToken,
+        };
+      })
+    );
+
+    try {
+      const uploadedUrl = await uploadImageFile(file);
+
+      setMemories((prev) =>
+        prev.map((m) => {
+          if (m.id !== id || m.uploadToken !== uploadToken) return m;
+
+          if (m.imagePreviewUrl?.startsWith('blob:')) {
+            revokeObjectUrl(m.imagePreviewUrl);
+          }
+
+          return {
+            ...m,
+            imageUrl: uploadedUrl,
+            imagePreviewUrl: uploadedUrl,
+            isUploadingImage: false,
+            imageUploadError: '',
+            uploadToken: '',
+          };
+        })
+      );
+    } catch (error) {
+      setMemories((prev) =>
+        prev.map((m) => {
+          if (m.id !== id || m.uploadToken !== uploadToken) return m;
+
+          return {
+            ...m,
+            imageUrl: '',
+            isUploadingImage: false,
+            imageUploadError: error.message || 'Image upload failed.',
+            uploadToken: '',
+          };
+        })
+      );
+    }
   };
 
   return (
@@ -99,16 +266,38 @@ export default function MemoryBuilder({ memories, setMemories }) {
                 />
               </div>
 
-              {/* Image URL */}
+              {/* Image Upload */}
               <div>
-                <label className="label">Image URL</label>
+                <label className="label">Upload Image</label>
                 <input
-                  type="url"
-                  value={mem.imageUrl}
-                  onChange={(e) => handleImageChange(mem.id, e.target.value)}
-                  placeholder="https://example.com/photo.jpg"
-                  className="input"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleFileChange(mem.id, e.target.files?.[0])}
+                  disabled={mem.isUploadingImage}
+                  className="input file:mr-3 file:rounded-lg file:border-0 file:bg-pink-100 file:px-3 file:py-1.5 file:text-pink-600 file:font-semibold"
                 />
+                <p className="text-xs text-gray-400 mt-1">PNG, JPG, WEBP, GIF (max 5MB)</p>
+                {mem.imageFileName && (
+                  <div className="mt-1.5 flex items-center justify-between gap-3">
+                    <p className="text-xs text-gray-500 truncate">Selected: {mem.imageFileName}</p>
+                    <button
+                      type="button"
+                      onClick={() => clearImage(mem.id)}
+                      className="text-xs font-semibold text-pink-500 hover:text-pink-600"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+                {mem.isUploadingImage && (
+                  <p className="text-xs text-blue-500 mt-1">Uploading image...</p>
+                )}
+                {mem.imageUploadError && (
+                  <p className="text-xs text-red-500 mt-1">{mem.imageUploadError}</p>
+                )}
+                {mem.imageUrl && !mem.isUploadingImage && !mem.imageUploadError && (
+                  <p className="text-xs text-green-600 mt-1">Image uploaded successfully.</p>
+                )}
               </div>
 
               {/* Caption */}
@@ -125,10 +314,10 @@ export default function MemoryBuilder({ memories, setMemories }) {
             </div>
 
             {/* Image preview */}
-            {mem.imageUrl && !previewErrors[mem.id] && (
+            {(mem.imagePreviewUrl || mem.imageUrl) && !previewErrors[mem.id] && (
               <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 bg-gray-50 h-32 relative">
                 <Image
-                  src={mem.imageUrl}
+                  src={mem.imagePreviewUrl || mem.imageUrl}
                   alt={mem.title || 'Memory image preview'}
                   fill
                   className="object-cover"
@@ -142,11 +331,9 @@ export default function MemoryBuilder({ memories, setMemories }) {
               </div>
             )}
 
-            {mem.imageUrl && previewErrors[mem.id] && (
+            {previewErrors[mem.id] && (
               <div className="mt-3 rounded-xl border-2 border-dashed border-red-200 bg-red-50 h-20 flex items-center justify-center">
-                <p className="text-xs text-red-400">
-                  ⚠️ Could not load image — check the URL
-                </p>
+                <p className="text-xs text-red-400">⚠️ {previewErrors[mem.id]}</p>
               </div>
             )}
           </div>

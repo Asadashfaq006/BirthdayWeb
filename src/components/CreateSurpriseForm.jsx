@@ -148,8 +148,16 @@ export default function CreateSurpriseForm() {
       });
     }
 
+    if (memories.some((m) => m.isUploadingImage)) {
+      errs.memoriesUpload = 'Please wait for all memory images to finish uploading.';
+    }
+
+    if (memories.some((m) => m.imageUploadError)) {
+      errs.memoriesUpload = 'Fix failed memory image uploads or remove those images.';
+    }
+
     return errs;
-  }, [formData, questions]);
+  }, [formData, questions, memories]);
 
   // ── Submit ──────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
@@ -157,8 +165,9 @@ export default function CreateSurpriseForm() {
     setSubmitError('');
 
     const validationErrors = validate();
+    setErrors(validationErrors);
+
     if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
       // Scroll to first error
       setTimeout(() => {
         const first = document.querySelector('[data-error]');
@@ -167,12 +176,20 @@ export default function CreateSurpriseForm() {
       return;
     }
 
+    const payloadMemories = memories.map((mem) => ({
+      id: mem.id,
+      title: mem.title,
+      date: mem.date,
+      caption: mem.caption,
+      imageUrl: mem.imageUrl,
+    }));
+
     setIsSubmitting(true);
     try {
       const res = await fetch('/api/create-birthday', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formData, questions, memories }),
+        body: JSON.stringify({ formData, questions, memories: payloadMemories }),
       });
 
       const data = await res.json();
@@ -194,6 +211,12 @@ export default function CreateSurpriseForm() {
   const questionValidationErrors = Object.entries(errors)
     .filter(([k]) => k.startsWith('q_') || k === 'questions')
     .map(([, v]) => v);
+
+  const memoryValidationErrors = Object.entries(errors)
+    .filter(([k]) => k === 'memoriesUpload')
+    .map(([, v]) => v);
+
+  const hasPendingImageUploads = memories.some((m) => m.isUploadingImage);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -450,10 +473,23 @@ export default function CreateSurpriseForm() {
             {/* ── Section 5: Memories ──────────────────────────────────── */}
             <Section
               title="📸 Memory Gallery"
-              subtitle="Add photos and captions from your favourite moments together"
+              subtitle="Upload photos and captions from your favourite moments together"
               headerGradient="from-rose-500 to-pink-500"
               badge={memories.length > 0 ? `${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}` : null}
             >
+              {memoryValidationErrors.length > 0 && (
+                <div
+                  data-error
+                  className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 space-y-1"
+                >
+                  {memoryValidationErrors.map((msg, i) => (
+                    <p key={i} className="text-red-600 text-xs flex items-center gap-1">
+                      <span>⚠</span> {msg}
+                    </p>
+                  ))}
+                </div>
+              )}
+
               <MemoryBuilder memories={memories} setMemories={setMemories} />
             </Section>
 
@@ -494,9 +530,9 @@ export default function CreateSurpriseForm() {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || hasPendingImageUploads}
                 className={`w-full py-4 rounded-2xl font-extrabold text-lg text-white transition-all duration-200 shadow-lg relative overflow-hidden ${
-                  isSubmitting
+                  isSubmitting || hasPendingImageUploads
                     ? 'bg-gray-300 cursor-not-allowed shadow-none'
                     : 'bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 hover:from-pink-600 hover:via-purple-600 hover:to-indigo-600 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0'
                 }`}
@@ -524,6 +560,8 @@ export default function CreateSurpriseForm() {
                     </svg>
                     Saving your surprise…
                   </span>
+                ) : hasPendingImageUploads ? (
+                  '📤 Uploading memory images...'
                 ) : (
                   '✨ Create Birthday Surprise'
                 )}
