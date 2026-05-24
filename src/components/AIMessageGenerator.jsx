@@ -85,7 +85,7 @@ export default function AIMessageGenerator() {
         {/* Name */}
         <div>
           <label className="block text-xs font-semibold text-gray-600 mb-1">
-            Birthday Person's Name *
+            Birthday Person&apos;s Name *
           </label>
           <input
             type="text"
