@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer components {
+  .input {
+    @apply w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400
+      focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent
+      transition-all duration-200;
+  }
+
+  .input-error {
+    @apply border-red-400 bg-red-50 focus:ring-red-400;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-gray-600 mb-1.5;
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500
+      hover:from-pink-600 hover:via-purple-600 hover:to-indigo-600
+      hover:shadow-lg hover:-translate-y-0.5
+      active:translate-y-0 active:shadow-md
+      transition-all duration-200 shadow-md;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-xl font-medium text-gray-600 bg-gray-100
+      hover:bg-gray-200 hover:text-gray-800
+      transition-all duration-200 text-sm;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden;
+  }
+
+  .card-header {
+    @apply px-6 py-4 flex items-center justify-between;
+  }
+
+  .error-msg {
+    @apply text-red-500 text-xs mt-1.5 flex items-center gap-1;
+  }
+}
